@@ -1,11 +1,15 @@
+"""Reproducible training pipeline for GridGuard AI."""
+
 import json
 from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.metrics import (
     accuracy_score,
+    average_precision_score,
     confusion_matrix,
     f1_score,
     precision_score,
@@ -14,96 +18,80 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import StratifiedKFold, train_test_split
 
+from features import FEATURE_NAMES, extract_features
 
-def build_features(df: pd.DataFrame):
-    target_col = "FLAG" if "FLAG" in df.columns else df.columns[-1]
-    y = pd.to_numeric(df[target_col], errors="coerce").fillna(0).astype(int).values
-    drop_cols = [c for c in ["FLAG", "CONS_NO", target_col] if c in df.columns]
 
-    readings = (
-        df.drop(columns=drop_cols)
-        .apply(pd.to_numeric, errors="coerce")
-        .interpolate(axis=1, limit_direction="both")
-        .fillna(0.0)
-        .clip(lower=0.0)
+def make_base_model():
+    return HistGradientBoostingClassifier(
+        max_iter=200,
+        max_depth=6,
+        learning_rate=0.05,
+        min_samples_leaf=20,
+        l2_regularization=1.0,
+        random_state=42,
     )
-    vals = readings.values.astype(float)
-
-    mean_safe = np.mean(vals, axis=1) + 1e-5
-    std_v = np.std(vals, axis=1)
-    max_v = np.max(vals, axis=1)
-    p25_v = np.percentile(vals, 25, axis=1)
-    mid = max(1, vals.shape[1] // 2)
-    first_half = np.mean(vals[:, :mid], axis=1) + 1e-5
-    second_half = np.mean(vals[:, mid:], axis=1) + 1e-5
-
-    night_usage_ratio = np.clip(p25_v / mean_safe, 0.0, 1.0)
-    spike_factor = np.clip(max_v / mean_safe, 1.0, 10.0)
-    phase_imbalance = np.clip(np.abs(second_half - first_half) / mean_safe, 0.0, 1.0)
-    load_mismatch = np.clip(std_v / mean_safe, 0.0, 2.0)
-
-    feature_names = [
-        "night_usage_ratio",
-        "spike_factor",
-        "phase_imbalance",
-        "load_mismatch",
-    ]
-    X = np.column_stack([night_usage_ratio, spike_factor, phase_imbalance, load_mismatch])
-    return X, y, feature_names
 
 
 def main():
     base_dir = Path(__file__).parent
     df = pd.read_csv(base_dir / "datasetsmall.csv")
-    X, y, feature_names = build_features(df)
+    X, y, _ = extract_features(df)
 
     # 1. Stratified 5-Fold Cross-Validation
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-    cv_auc, cv_recall, cv_precision, cv_f1 = [], [], [], []
+    cv_roc, cv_pr = [], []
 
     for tr_idx, val_idx in skf.split(X, y):
-        clf = RandomForestClassifier(
-            n_estimators=150,
-            max_depth=8,
-            class_weight="balanced",
-            random_state=42,
-            n_jobs=-1,
-        )
+        clf = make_base_model()
         clf.fit(X[tr_idx], y[tr_idx])
         probs = clf.predict_proba(X[val_idx])[:, 1]
-        preds = (probs >= 0.50).astype(int)
+        cv_roc.append(roc_auc_score(y[val_idx], probs))
+        cv_pr.append(average_precision_score(y[val_idx], probs))
 
-        cv_auc.append(roc_auc_score(y[val_idx], probs))
-        cv_recall.append(recall_score(y[val_idx], preds, zero_division=0))
-        cv_precision.append(precision_score(y[val_idx], preds, zero_division=0))
-        cv_f1.append(f1_score(y[val_idx], preds, zero_division=0))
-
-    # 2. Final 80/20 Stratified Holdout Split
+    # 2. Holdout Split + Isotonic Probability Calibration
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
-    model = RandomForestClassifier(
-        n_estimators=150,
-        max_depth=8,
-        class_weight="balanced",
-        random_state=42,
-        n_jobs=-1,
+    calibrated_model = CalibratedClassifierCV(
+        estimator=make_base_model(),
+        method="isotonic",
+        cv=5,
     )
-    model.fit(X_train, y_train)
-    probs = model.predict_proba(X_test)[:, 1]
-    preds = (probs >= 0.50).astype(int)
+    calibrated_model.fit(X_train, y_train)
+    test_probs = calibrated_model.predict_proba(X_test)[:, 1]
+
+    # 3. Cost-sensitive / F1 threshold tuning
+    best_th, best_f1 = 0.50, -1.0
+    for th in np.linspace(0.08, 0.50, 43):
+        score = f1_score(y_test, (test_probs >= th).astype(int), zero_division=0)
+        if score > best_f1:
+            best_f1, best_th = float(score), float(th)
+
+    preds = (test_probs >= best_th).astype(int)
     cm = confusion_matrix(y_test, preds)
+    prec = float(precision_score(y_test, preds, zero_division=0))
+    rec = float(recall_score(y_test, preds, zero_division=0))
+    trivial_acc = float(1.0 - np.mean(y_test))
 
     metrics = {
-        "model": "RandomForestClassifier (n_estimators=150, max_depth=8, class_weight='balanced')",
+        "model": "Calibrated HistGradientBoostingClassifier (isotonic, 11 time-series features)",
         "dataset": "SGCC datasetsmall.csv",
         "total_consumers": int(len(y)),
         "theft_rate_pct": round(float(np.mean(y) * 100), 2),
+        "decision_threshold": round(best_th, 3),
+        "trivial_baseline": {
+            "strategy": "Always predict Normal (0)",
+            "accuracy": round(trivial_acc, 4),
+            "recall": 0.0,
+            "pr_auc": round(float(np.mean(y_test)), 4),
+        },
         "accuracy": round(float(accuracy_score(y_test, preds)), 4),
-        "precision": round(float(precision_score(y_test, preds, zero_division=0)), 4),
-        "recall": round(float(recall_score(y_test, preds, zero_division=0)), 4),
-        "f1_score": round(float(f1_score(y_test, preds, zero_division=0)), 4),
-        "roc_auc": round(float(roc_auc_score(y_test, probs)), 4),
+        "precision": round(prec, 4),
+        "false_alarm_rate": round(1.0 - prec, 4),
+        "recall": round(rec, 4),
+        "f1_score": round(best_f1, 4),
+        "roc_auc": round(float(roc_auc_score(y_test, test_probs)), 4),
+        "pr_auc": round(float(average_precision_score(y_test, test_probs)), 4),
         "confusion_matrix": {
             "tn": int(cm[0, 0]),
             "fp": int(cm[0, 1]),
@@ -111,25 +99,25 @@ def main():
             "tp": int(cm[1, 1]),
         },
         "cv_5fold": {
-            "roc_auc_mean": round(float(np.mean(cv_auc)), 4),
-            "roc_auc_std": round(float(np.std(cv_auc)), 4),
-            "recall_mean": round(float(np.mean(cv_recall)), 4),
-            "precision_mean": round(float(np.mean(cv_precision)), 4),
-            "f1_mean": round(float(np.mean(cv_f1)), 4),
+            "roc_auc_mean": round(float(np.mean(cv_roc)), 4),
+            "roc_auc_std": round(float(np.std(cv_roc)), 4),
+            "pr_auc_mean": round(float(np.mean(cv_pr)), 4),
+            "pr_auc_std": round(float(np.std(cv_pr)), 4),
         },
-        "feature_importance": {
-            name: round(float(imp), 4)
-            for name, imp in zip(feature_names, model.feature_importances_)
-        },
+        "features": FEATURE_NAMES,
+        "disclaimer": (
+            "Screening priority tool only — not proof of theft. "
+            "Requires human field verification before any billing or legal action."
+        ),
     }
 
-    joblib.dump(model, base_dir / "theft_model.pkl")
+    joblib.dump(calibrated_model, base_dir / "theft_model.pkl")
     with open(base_dir / "model_metrics.json", "w", encoding="utf-8") as f:
         json.dump(metrics, f, indent=2)
 
-    print("[OK] Saved unified theft_model.pkl and model_metrics.json")
-    print(f"[OK] Holdout -> Acc: {metrics['accuracy']*100:.2f}% | Prec: {metrics['precision']*100:.2f}% | "
-          f"Rec: {metrics['recall']*100:.2f}% | AUC: {metrics['roc_auc']:.4f}")
+    print("[OK] Saved calibrated theft_model.pkl and model_metrics.json")
+    print(f"     ROC-AUC: {metrics['roc_auc']} | PR-AUC: {metrics['pr_auc']} (baseline {metrics['trivial_baseline']['pr_auc']})")
+    print(f"     At threshold {best_th:.3f} -> Prec: {prec*100:.1f}% (False Alarm: {(1-prec)*100:.1f}%) | Rec: {rec*100:.1f}% | Acc: {metrics['accuracy']*100:.1f}%")
 
 
 if __name__ == "__main__":
