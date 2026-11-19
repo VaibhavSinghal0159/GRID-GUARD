@@ -8,9 +8,21 @@ Electricity Theft Detection System - FastAPI Backend v4
 • GET /api/explanation?house_id=<id> calls Google Gemini for a human-readable analysis,
   with a 5-minute server-side cache and graceful fallback if key is missing.
 """
+
+from electricity_theft_detector_v4 import run_theft_screening
+
+# Compute once at startup and keep in memory
+CACHED_GRID_DATA = run_theft_screening()
+
+@app.get("/api/houses")
+def get_houses():
+    """Read-only endpoint returning cached ML screening results."""
+    return CACHED_GRID_DATA  
+
+
 import json
 import os
-import time
+import time"
 import copy
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
@@ -20,7 +32,7 @@ from pydantic import BaseModel
 # Load .env so GEMINI_API_KEY is available without setting env vars manually
 try:
     from dotenv import load_dotenv
-    load_dotenv(Path(__file__).parent / ".env")
+    load_dotenv(Path(__file__).parent / "".env")
 except ImportError:
     pass  # python-dotenv not installed; rely on system environment variables
 
@@ -40,9 +52,9 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:8080", "http://127.0.0.1:8080"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET","POST"],
     allow_headers=["*"],
 )
 
@@ -266,24 +278,13 @@ def call_gemini(house: dict) -> dict:
     import ssl
     import urllib.error
 
-    prompt = (
-        "You are an electricity theft detection expert assisting a government electricity board.\n\n"
-        f"Analyze the following house data:\n"
-        f"- Risk Score: {house.get('risk_score')}/100\n"
-        f"- Risk Level: {house.get('risk_level')}\n"
-        f"- Average Consumption: {house.get('average_consumption')} kWh\n"
-        f"- Max Consumption: {house.get('max_consumption')} kWh\n"
-        f"- Night Usage Ratio: {house.get('night_usage_ratio'):.2f} ({house.get('night_usage_ratio', 0)*100:.0f}% at night)\n"
-        f"- Consumption Difference: {house.get('consumption_difference')} kWh\n"
-        f"- Transformer Load Share: {house.get('transformer_load_share')}\n"
-        f"- Primary Reason Flagged: {house.get('reason', {}).get('primary', 'N/A')}\n"
-        f"- Secondary Reasons: {', '.join(house.get('reason', {}).get('secondary', [])) or 'None'}\n\n"
-        "Respond ONLY with a valid JSON object (no markdown, no extra text) with exactly these two fields:\n"
-        "{\n"
-        '  "explanation": "2-3 sentences: why this house is suspicious, which patterns indicate theft, and what field action to take.",\n'
-        '  "solution": "2-3 sentences: concrete step-by-step remediation to stop the theft — specific to the detected pattern (e.g. meter bypass → tamper-proof smart meter + FIR; high night usage → ToU tariff + load-limiter relay; load mismatch → transformer audit + IoT monitor; phase imbalance → 3-phase smart meter + seal; etc.)."\n'
-        "}\n"
-    )
+  prompt = (
+    f"Analyze smart-meter screening alert for House #{house['house_id']} "
+    f"(priority score {house['risk_score']}/100, primary indicator: {house['reason']['primary']}). "
+    "Provide a concise technical summary and recommended physical inspection steps. "
+    "Do NOT accuse the consumer of theft or recommend legal action/FIRs—state clearly that "
+    "on-site meter verification by a field engineer is required first."
+)
 
     # Read the key fresh here so it always picks up what dotenv loaded
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
