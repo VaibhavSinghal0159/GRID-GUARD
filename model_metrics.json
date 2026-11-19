@@ -1,0 +1,7 @@
+{
+  "model": "RandomForestClassifier",
+  "accuracy": 96.75,
+  "precision": 95.63,
+  "recall": 98.01,
+  "f1_score": 96.81
+}
