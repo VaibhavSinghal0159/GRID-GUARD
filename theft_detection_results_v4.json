@@ -15,7 +15,7 @@
     "loss_ratio": 0.1,
     "zone_status": "Warning",
     "estimated_loss_in_rupees": 278.31,
-    "last_updated": "2026-11-20T00:36:44"
+    "last_updated": "2026-11-20T03:04:21"
   },
   "insights": {
     "top_5_houses": [
@@ -1325,5 +1325,5 @@
       "priority_rank": 50
     }
   ],
-  "last_updated": "2026-11-20T00:36:44"
+  "last_updated": "2026-11-20T03:04:21"
 }
