@@ -1,7 +1,22 @@
 {
-  "model": "RandomForestClassifier",
-  "accuracy": 96.75,
-  "precision": 95.63,
-  "recall": 98.01,
-  "f1_score": 96.81
+  "dataset": "SGCC datasetsmall.csv",
+  "total_samples": 25863,
+  "selected_model": "RandomForestClassifier (class_weight=balanced)",
+  "accuracy": 67.91,
+  "precision": 10.54,
+  "recall": 38.92,
+  "f1_score": 16.58,
+  "roc_auc": 0.5769,
+  "confusion_matrix": {
+    "tn": 3348,
+    "fp": 1401,
+    "fn": 259,
+    "tp": 165
+  },
+  "feature_importance": {
+    "night_usage_ratio": 0.1919,
+    "spike_factor": 0.2645,
+    "phase_imbalance": 0.2539,
+    "load_mismatch": 0.2897
+  }
 }

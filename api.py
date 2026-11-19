@@ -470,9 +470,19 @@ def get_explanation(house_id: int = Query(..., ge=1, le=100)):
     }
 
 
+@app.get("/api/model-metrics")
+def get_model_metrics():
+    metrics_path = Path(__file__).parent / "model_metrics.json"
+    if not metrics_path.exists():
+        raise HTTPException(status_code=404, detail="model_metrics.json not found")
+    with open(metrics_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
 # ─────────────────────────────────────────────
 # Dev runner
 # ─────────────────────────────────────────────
+import uvicorn 
+
 if __name__ == "__main__":
-    import uvicorn
     uvicorn.run("api:app", host="0.0.0.0", port=8000, reload=True)
+   
