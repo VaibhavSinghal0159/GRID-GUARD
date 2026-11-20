@@ -310,13 +310,11 @@ def call_gemini(house: dict) -> dict:
         },
     }).encode("utf-8")
 
-    # Build an SSL context — try certifi first, fall back to unverified
-    try:
-        import certifi
-        ssl_ctx = ssl.create_default_context(cafile=certifi.where())
-    except ImportError:
-        ssl_ctx = ssl._create_unverified_context()
-        print("[SSL] certifi not found — using unverified SSL context")
+    # Build a strict TLS context using certifi (fail closed on TLS errors)
+    import ssl
+    import certifi
+
+    ssl_ctx = ssl.create_default_context(cafile=certifi.where())
 
     MAX_RETRIES = 3
     for attempt in range(1, MAX_RETRIES + 1):

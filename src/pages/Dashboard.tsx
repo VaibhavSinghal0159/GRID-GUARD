@@ -334,7 +334,7 @@ const Dashboard = () => {
       "Electricity Theft Detection Report — GridGuard AI",
       `Generated: ${new Date().toLocaleString()}`,
       `Transformer Loss: ${data.transformer.loss.toFixed(4)} kWh | Loss %: ${(data.transformer.loss_percentage * 100).toFixed(2)}%`,
-      `Estimated Revenue Loss: ₹${data.transformer.estimated_loss_in_rupees}`,
+      `Estimated Loss: ₹${data.transformer.estimated_loss_in_rupees}`,
       `Zone Status: ${data.transformer.status}`,
       `High Risk Houses: ${data.insights.total_high_risk}`,
       "",
@@ -412,7 +412,7 @@ const Dashboard = () => {
     ? [
         {
           icon: Zap,
-          label: "Est. Loss",
+          label: "Est. exposure (illustrative)",
           value: `₹${data.insights.estimated_loss.toFixed(2)}`,
           color: "text-destructive",
         },

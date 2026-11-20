@@ -1,4 +1,4 @@
-"""Reproducible training pipeline for GridGuard AI."""
+"""Reproducible training pipeline for GridGuard AI (leakage-free 60/20/20 split)."""
 
 import json
 from pathlib import Path
@@ -37,7 +37,7 @@ def main():
     df = pd.read_csv(base_dir / "datasetsmall.csv")
     X, y, _ = extract_features(df)
 
-    # 1. Stratified 5-Fold Cross-Validation
+    # 1. Stratified 5-Fold Cross-Validation (ranking quality check)
     skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
     cv_roc, cv_pr = [], []
 
@@ -48,37 +48,46 @@ def main():
         cv_roc.append(roc_auc_score(y[val_idx], probs))
         cv_pr.append(average_precision_score(y[val_idx], probs))
 
-    # 2. Holdout Split + Isotonic Probability Calibration
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42, stratify=y
+    # 2. Strict 60% Train / 20% Validation / 20% Holdout Test Split
+    X_train_val, X_test, y_train_val, y_test = train_test_split(
+        X, y, test_size=0.20, random_state=42, stratify=y
     )
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_train_val, y_train_val, test_size=0.25, random_state=42, stratify=y_train_val
+    )
+
     calibrated_model = CalibratedClassifierCV(
         estimator=make_base_model(),
         method="isotonic",
         cv=5,
     )
     calibrated_model.fit(X_train, y_train)
-    test_probs = calibrated_model.predict_proba(X_test)[:, 1]
 
-    # 3. Cost-sensitive / F1 threshold tuning
-    best_th, best_f1 = 0.50, -1.0
+    # 3. Tune decision threshold ONLY on the validation split
+    val_probs = calibrated_model.predict_proba(X_val)[:, 1]
+    best_th, best_val_f1 = 0.50, -1.0
     for th in np.linspace(0.08, 0.50, 43):
-        score = f1_score(y_test, (test_probs >= th).astype(int), zero_division=0)
-        if score > best_f1:
-            best_f1, best_th = float(score), float(th)
+        score = f1_score(y_val, (val_probs >= th).astype(int), zero_division=0)
+        if score > best_val_f1:
+            best_val_f1, best_th = float(score), float(th)
 
+    # 4. Evaluate ONCE on the untouched holdout test split
+    test_probs = calibrated_model.predict_proba(X_test)[:, 1]
     preds = (test_probs >= best_th).astype(int)
     cm = confusion_matrix(y_test, preds)
     prec = float(precision_score(y_test, preds, zero_division=0))
     rec = float(recall_score(y_test, preds, zero_division=0))
+    test_f1 = float(f1_score(y_test, preds, zero_division=0))
     trivial_acc = float(1.0 - np.mean(y_test))
 
     metrics = {
         "model": "Calibrated HistGradientBoostingClassifier (isotonic, 11 time-series features)",
         "dataset": "SGCC datasetsmall.csv",
+        "split_strategy": "60% Train / 20% Validation (threshold tuning) / 20% Holdout Test",
         "total_consumers": int(len(y)),
         "theft_rate_pct": round(float(np.mean(y) * 100), 2),
         "decision_threshold": round(best_th, 3),
+        "validation_f1_at_threshold": round(best_val_f1, 4),
         "trivial_baseline": {
             "strategy": "Always predict Normal (0)",
             "accuracy": round(trivial_acc, 4),
@@ -89,7 +98,7 @@ def main():
         "precision": round(prec, 4),
         "false_alarm_rate": round(1.0 - prec, 4),
         "recall": round(rec, 4),
-        "f1_score": round(best_f1, 4),
+        "f1_score": round(test_f1, 4),
         "roc_auc": round(float(roc_auc_score(y_test, test_probs)), 4),
         "pr_auc": round(float(average_precision_score(y_test, test_probs)), 4),
         "confusion_matrix": {
@@ -116,8 +125,15 @@ def main():
         json.dump(metrics, f, indent=2)
 
     print("[OK] Saved calibrated theft_model.pkl and model_metrics.json")
-    print(f"     ROC-AUC: {metrics['roc_auc']} | PR-AUC: {metrics['pr_auc']} (baseline {metrics['trivial_baseline']['pr_auc']})")
-    print(f"     At threshold {best_th:.3f} -> Prec: {prec*100:.1f}% (False Alarm: {(1-prec)*100:.1f}%) | Rec: {rec*100:.1f}% | Acc: {metrics['accuracy']*100:.1f}%")
+    print(
+        f"     Holdout Test -> ROC-AUC: {metrics['roc_auc']} | "
+        f"PR-AUC: {metrics['pr_auc']} (baseline {metrics['trivial_baseline']['pr_auc']})"
+    )
+    print(
+        f"     Val-tuned threshold {best_th:.3f} -> "
+        f"Prec: {prec*100:.1f}% (False Alarm: {(1-prec)*100:.1f}%) | "
+        f"Rec: {rec*100:.1f}% | F1: {test_f1*100:.1f}% | Acc: {metrics['accuracy']*100:.1f}%"
+    )
 
 
 if __name__ == "__main__":

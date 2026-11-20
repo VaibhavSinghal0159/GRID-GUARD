@@ -200,7 +200,7 @@ export default function GridMap({
                 Loss %: <b>{lossPct}%</b>
               </div>
               <div>
-                Est. Revenue Loss:{" "}
+                "Est. Illustrative Loss" :{" "}
                 <b>₹{transformer.estimated_loss_in_rupees.toFixed(2)}</b>
               </div>
             </div>

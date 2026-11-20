@@ -69,9 +69,9 @@ const Landing = () => {
           {/* Stats */}
           <div className="grid grid-cols-3 gap-6 mt-20 max-w-3xl mx-auto">
             {[
-              { value: "~85%", label: "Model Precision (Isolation Forest)" },
-              { value: "₹2.4Cr", label: "Avg. Annual Recovery" },
-              { value: "<2s", label: "Real-time Alerts" },
+          { value: "50", label: "SGCC Meters Screened" },
+          { value: "0.64", label: "ROC-AUC (Screening)" },
+          { value: "<2s", label: "Real-time Alerts" },
             ].map((s) => (
               <div key={s.label} className="glass rounded-2xl p-5">
                 <div className="text-2xl md:text-4xl font-bold text-gradient">{s.value}</div>
