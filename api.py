@@ -12,9 +12,7 @@ Electricity Theft Detection System - FastAPI Backend v4
 from electricity_theft_detector_v4 import run_theft_screening
 
 # Compute once at startup and keep in memory
-CACHED_GRID_DATA = run_theft_screening()
 
-@app.get("/api/houses")
 def get_houses():
     """Read-only endpoint returning cached ML screening results."""
     return CACHED_GRID_DATA  
@@ -22,7 +20,7 @@ def get_houses():
 
 import json
 import os
-import time"
+import time
 import copy
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query
@@ -32,7 +30,7 @@ from pydantic import BaseModel
 # Load .env so GEMINI_API_KEY is available without setting env vars manually
 try:
     from dotenv import load_dotenv
-    load_dotenv(Path(__file__).parent / "".env")
+    load_dotenv(Path(__file__).parent / ".env")
 except ImportError:
     pass  # python-dotenv not installed; rely on system environment variables
 
@@ -57,6 +55,14 @@ app.add_middleware(
     allow_methods=["GET","POST"],
     allow_headers=["*"],
 )
+
+CACHED_GRID_DATA = run_theft_screening()
+
+@app.get("/api/houses")
+def get_houses():
+    """Read-only endpoint returning cached ML screening results."""
+    return CACHED_GRID_DATA
+
 
 # ─────────────────────────────────────────────
 # Paths & config
@@ -278,13 +284,13 @@ def call_gemini(house: dict) -> dict:
     import ssl
     import urllib.error
 
-  prompt = (
-    f"Analyze smart-meter screening alert for House #{house['house_id']} "
-    f"(priority score {house['risk_score']}/100, primary indicator: {house['reason']['primary']}). "
-    "Provide a concise technical summary and recommended physical inspection steps. "
-    "Do NOT accuse the consumer of theft or recommend legal action/FIRs—state clearly that "
-    "on-site meter verification by a field engineer is required first."
-)
+    prompt = (
+        f"Analyze smart-meter screening alert for House #{house['house_id']} "
+        f"(priority score {house['risk_score']}/100, primary indicator: {house['reason']['primary']}). "
+        "Provide a concise technical summary and recommended physical inspection steps. "
+        "Do NOT accuse the consumer of theft or recommend legal action/FIRs—state clearly that "
+        "on-site meter verification by a field engineer is required first."
+    )
 
     # Read the key fresh here so it always picks up what dotenv loaded
     api_key = os.environ.get("GEMINI_API_KEY", "").strip()
@@ -363,14 +369,8 @@ def root():
 
 @app.get("/api/houses")
 def get_all_houses():
-    """
-    Generates fresh random detection data on EVERY call.
-    This means the map, charts, and risk scores refresh with new data each time.
-    Also persists the result to theft_detection_results_v4.json.
-    """
-    data = generate_random_data()
-    save_to_json(data, JSON_PATH)
-    return data
+    """Read-only endpoint returning cached ML screening results."""
+    return CACHED_GRID_DATA
 
 
 @app.get("/api/insights")

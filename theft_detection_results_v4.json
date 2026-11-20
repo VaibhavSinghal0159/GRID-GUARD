@@ -19,7 +19,7 @@
     "zone_status": "Normal",
     "estimated_loss_in_rupees": 127.72,
     "is_illustrative": true,
-    "last_updated": "2026-11-20T03:28:08"
+    "last_updated": "2026-11-20T09:36:46"
   },
   "insights": {
     "top_5_houses": [
@@ -1357,5 +1357,5 @@
       "priority_rank": 50
     }
   ],
-  "last_updated": "2026-11-20T03:28:08"
+  "last_updated": "2026-11-20T09:36:46"
 }
